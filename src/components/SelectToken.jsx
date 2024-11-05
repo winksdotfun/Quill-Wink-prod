@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Assets from './Assets';
+import { analytics } from '../firebase';
+import { logEvent } from 'firebase/analytics';
 
 const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChainId, empty, setempty , buttonclick , setButtonclick }) => {
   const [selectedButton, setSelectedButton] = useState(null);
@@ -20,11 +22,36 @@ const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChain
     SOL: '#300D5A',
   };
 
+    // Helper function for safe analytics logging
+    const logAnalyticsEvent = (eventName, eventParams) => {
+      if (analytics) {
+        logEvent(analytics, eventName, eventParams);
+      }
+    };
+  
+    // Track initial component load
+    useEffect(() => {
+      logAnalyticsEvent('token_selection_view', {
+        timestamp: new Date().toISOString()
+      });
+    }, []);
+
   const handleButtonClick = (buttonIndex, token) => {
+    const previousToken = selectedButton ? Object.keys(tokenChainMap)[selectedButton - 1] : null;
+
     setSelectedButton(buttonIndex);
     setSelectedToken(token);
     setChainId(tokenChainMap[token]); // Set the chainId based on the selected token
     setButtonclick(false);
+
+    // Log chain selection event
+    logAnalyticsEvent('chain_selected', {
+      chain: token,
+      previous_chain: previousToken,
+      time_since_last_interaction: Math.floor((Date.now() - lastInteractionTime) / 1000)
+    });
+
+    setLastInteractionTime(Date.now());
   };
 
   // const handleInputChange = (e) => {
@@ -39,8 +66,51 @@ const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChain
     setInputValue(e.target.value);
     setTokenAddress(e.target.value); // Update token address
     setempty(false);
+
+    // Log address input events (debounced to avoid too many events)
+    if (newValue.length > 0 && newValue.length % 10 === 0) { // Log every 10 characters
+      logAnalyticsEvent('address_input', {
+        length: newValue.length,
+        selected_chain: selectedButton ? Object.keys(tokenChainMap)[selectedButton - 1] : null,
+        is_valid_format: selectedButton === 5 ? 
+          (newValue.length >= 43 && newValue.length <= 47) : // SOL address length
+          newValue.length === 42 // EVM address length
+      });
+    }
   }
     
+  const handleCheckWithAnalytics = () => {
+    // Validate input before logging
+    const isValidLength = selectedButton === 5 ? 
+      (inputValue.length >= 43 && inputValue.length <= 47) : // SOL
+      inputValue.length === 42; // EVM
+
+    // Log check attempt
+    logAnalyticsEvent('check_attempt', {
+      chain: selectedButton ? Object.keys(tokenChainMap)[selectedButton - 1] || 'SOL' : null,
+      address_length: inputValue.length,
+      is_valid_length: isValidLength,
+      has_chain_selected: selectedButton !== null,
+      time_since_last_interaction: Math.floor((Date.now() - lastInteractionTime) / 1000)
+    });
+
+    // Log validation errors
+    if (!selectedButton) {
+      logAnalyticsEvent('validation_error', {
+        error_type: 'no_chain_selected',
+        address_length: inputValue.length
+      });
+    } else if (!isValidLength) {
+      logAnalyticsEvent('validation_error', {
+        error_type: 'invalid_address_length',
+        chain: selectedButton ? Object.keys(tokenChainMap)[selectedButton - 1] || 'SOL' : null,
+        address_length: inputValue.length
+      });
+    }
+
+    setLastInteractionTime(Date.now());
+    onCheckClick();
+  };
 
   return (
     <div
@@ -98,7 +168,7 @@ const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChain
         )}
         <div className="flex justify-end rounded-[20px] ">
           <button
-            onClick={onCheckClick}
+            onClick={handleCheckWithAnalytics}
             className="bg-[#007AFF] hover:bg-[#007AFF]/70 rounded-[5px] text-white p-1 sm:p-2 text-sm sm:text-lg w-[80px] sm:w-[120px] ml-auto border-y border-y-[#86AFFF]"
           >
             Check

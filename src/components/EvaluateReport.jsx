@@ -7,6 +7,9 @@ import Report from './Evaluate/Report';
 import Info from './Evaluate/Info';
 import Polygon from "../assets/icons/Polygon.png"
 import axios from 'axios';
+import { analytics } from '../firebase';
+import { logEvent } from 'firebase/analytics';
+
 
 const EvaluateReport = ({ onBackClick, selectedToken, tokenAddress, chainId }) => {
   const [valueFetch, setValueFetch] = useState(null);
@@ -67,13 +70,55 @@ const EvaluateReport = ({ onBackClick, selectedToken, tokenAddress, chainId }) =
         console.log(data);
         if (data.errorStatus === 420) {
           setErcerror(true)
+          
+          // Log ERC error
+          logEvent(analytics, 'erc_error', {
+            token_type: selectedToken,
+            chain_id: chainId,
+            address: tokenAddress
+          });
         }
+
+        // Log successful analysis
+        logEvent(analytics, 'analysis_complete', {
+          token_type: selectedToken,
+          chain_id: chainId,
+          address: tokenAddress,
+          is_honeypot: data?.honeypotDetails?.isPairHoneypot === 1,
+          total_score: data?.honeypotDetails?.overAllScorePercentage,
+          holders_count: data?.marketChecks?.marketCheckDescription?.holdersDescription?.holdersCount?.number
+        });
+
+        // Track risk levels
+        logEvent(analytics, 'risk_assessment', {
+          critical_points: data?.tokenInformation.totalChecksInformation?.aggregatedCount[0]?.count || 0,
+          risky_points: data?.tokenInformation.totalChecksInformation?.aggregatedCount.find(item => item.name === "RISKY")?.count || 0,
+          medium_points: data?.tokenInformation.totalChecksInformation?.aggregatedCount.find(item => item.name === "Medium Risk")?.count || 0,
+          neutral_points: data?.tokenInformation.totalChecksInformation?.aggregatedCount.find(item => item.name === "Neutral")?.count || 0
+        });
+
+        // Track if it's a honeypot
+        if (data?.honeypotDetails?.isPairHoneypot === 1) {
+          logEvent(analytics, 'honeypot_detected', {
+            token_type: selectedToken,
+            address: tokenAddress,
+            chain_id: chainId
+          });
+        }
+
         setOwner(data?.tokenInformation?.generalInformation?.ownerAddress)
         console.log('====================================');
       }
 
     } catch (error) {
       setError('Failed to fetch token information');
+      // Log error event
+      logEvent(analytics, 'fetch_error', {
+        token_type: selectedToken,
+        chain_id: chainId,
+        address: tokenAddress,
+        error_message: error.message
+      });
     } finally {
       setLoading(false);
     }
@@ -89,6 +134,12 @@ const EvaluateReport = ({ onBackClick, selectedToken, tokenAddress, chainId }) =
   useEffect(() => {
     if (tokenAddress) {
       fetchTokenInfo();
+      // Add report view event when component mounts
+      logEvent(analytics, 'report_viewed', {
+        token_type: selectedToken,
+        chain_id: chainId,
+        address: tokenAddress
+      });
     }
   }, [tokenAddress, chainId]);
 
@@ -168,6 +219,30 @@ const EvaluateReport = ({ onBackClick, selectedToken, tokenAddress, chainId }) =
   const medium = !ercerror && valueFetch?.riskCategories?.medium || 0;
   const neutral = !ercerror && valueFetch?.riskCategories?.neutral || 0;
 
+  // Add this where you define other constants
+  useEffect(() => {
+    if (valueFetch && !ercerror) {
+      // Track high-risk tokens
+      if (criticalPoint > 0) {
+        logEvent(analytics, 'high_risk_token', {
+          token_type: selectedToken,
+          address: tokenAddress,
+          critical_count: criticalPoint,
+          total_score: totalScore
+        });
+      }
+
+      // Track suspicious tax rates
+      if (buyTax > 10 || sellTax > 10) {
+        logEvent(analytics, 'high_tax_detected', {
+          token_type: selectedToken,
+          address: tokenAddress,
+          buy_tax: buyTax,
+          sell_tax: sellTax
+        });
+      }
+    }
+  }, [valueFetch]);
 
   const tokenImage = tokenImages[selectedToken]
   // Honeypot status message

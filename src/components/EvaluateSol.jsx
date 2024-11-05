@@ -5,6 +5,8 @@ import Report from './EvaluateSol/Report';
 import Status from './EvaluateSol/Status';
 import Assets from './Assets';
 import Solana from "../assets/icons/Solana.svg"
+import { analytics } from '../firebase';
+import { logEvent } from 'firebase/analytics';
 
 const EvaluateSol = ({ onBackClick, tokenAddress, selectedToken }) => {
     const [loading, setLoading] = useState(false);
@@ -32,6 +34,22 @@ const EvaluateSol = ({ onBackClick, tokenAddress, selectedToken }) => {
         return isNaN(value) ? '-' : value;
     };
 
+    // Helper function for safe analytics logging
+    const logAnalyticsEvent = (eventName, eventParams) => {
+        if (analytics) {
+            logEvent(analytics, eventName, eventParams);
+        }
+    };
+
+    // Track initial component load
+    useEffect(() => {
+        if (tokenAddress) {
+            logAnalyticsEvent('sol_analysis_started', {
+                token_address: tokenAddress
+            });
+        }
+    }, [tokenAddress]);
+
     const fetchTokenInfo = async () => {
         setLoading(true);
         try {
@@ -54,17 +72,73 @@ const EvaluateSol = ({ onBackClick, tokenAddress, selectedToken }) => {
                     console.log('====================================');
                     console.log(data);
                     console.log('====================================');
-                    setErcerror(true)
+                    setErcerror(true);
+                    logAnalyticsEvent('sol_analysis_error', {
+                        error_type: 'contract_not_found',
+                        token_address: tokenAddress
+                    });
+                } else {
+                    // Log successful analysis
+                    logAnalyticsEvent('sol_analysis_complete', {
+                        token_address: tokenAddress,
+                        token_name: data?.tokenInformation?.generalInformation?.tokenName,
+                        token_symbol: data?.tokenInformation?.generalInformation?.tokenSymbol,
+                        total_score: data?.honeypotDetails?.overAllScorePercentage,
+                        holders_count: data?.marketChecks?.marketCheckDescription?.holdersDescription?.holdersCount?.number,
+                        has_minting_auth: data?.codeChecks?.codeCheckDescription?.ownershipPermissionsDescription[0]?.heading === "Token Minting Authority is Enabled",
+                        has_freezing_auth: data?.codeChecks?.codeCheckDescription?.ownershipPermissionsDescription[1]?.heading === "Token Freezing Authority is Enabled",
+                        is_metadata_mutable: data?.codeChecks?.codeCheckDescription?.ownershipPermissionsDescription[2]?.heading === "Token Metadata is Mutable"
+                    });
+
+                    // Log high-risk indicators
+                    if (data?.honeypotDetails?.overAllScorePercentage < 50) {
+                        logAnalyticsEvent('sol_high_risk_detected', {
+                            token_address: tokenAddress,
+                            score: data?.honeypotDetails?.overAllScorePercentage,
+                            risk_factors: {
+                                minting_enabled: mintingAuth,
+                                freezing_enabled: freezingAuth,
+                                mutable_metadata: metadataStatus
+                            }
+                        });
+                    }
                 }
                 setOwner(data?.tokenInformation?.generalInformation?.ownerAddress)
                 console.log('====================================');
             }
         } catch (error) {
             setError('Error fetching token information');
+            logAnalyticsEvent('sol_analysis_error', {
+                error_type: 'fetch_failed',
+                token_address: tokenAddress,
+                error_message: error.message
+            });
         } finally {
             setLoading(false);
         }
     };
+
+    // Track when users return to search
+    const handleBackWithAnalytics = () => {
+        logAnalyticsEvent('sol_return_to_search', {
+            token_address: tokenAddress,
+            total_score: totalScore,
+            viewing_duration: Math.floor((Date.now() - mountTime) / 1000) // Time spent in seconds
+        });
+        onBackClick();
+    };
+
+    // Track viewing duration
+    const [mountTime] = useState(Date.now());
+
+    useEffect(() => {
+        return () => {
+            logAnalyticsEvent('sol_analysis_view_duration', {
+                token_address: tokenAddress,
+                duration_seconds: Math.floor((Date.now() - mountTime) / 1000)
+            });
+        };
+    }, [tokenAddress, mountTime]);
 
     useEffect(() => {
         if (tokenAddress) {
@@ -157,7 +231,7 @@ const EvaluateSol = ({ onBackClick, tokenAddress, selectedToken }) => {
                             <div className="flex rounded-[20px]">
                                 <div className="border p-1 rounded">
                                     <img
-                                        onClick={onBackClick}
+                                        onClick={handleBackWithAnalytics}
                                         src="https://cdn.iconscout.com/icon/premium/png-256-thumb/back-arrow-9601866-8212676.png?f=webp&w=256"
                                         className="sm:w-5 w-3 h-3 sm:h-5"
                                         alt="Back"
@@ -255,7 +329,7 @@ const EvaluateSol = ({ onBackClick, tokenAddress, selectedToken }) => {
 
 
                     </div><div >
-                        <button className='underline' onClick={onBackClick}>Go back</button>
+                        <button className='underline' onClick={handleBackWithAnalytics}>Go back</button>
                     </div>
 
                 </div>
