@@ -6,6 +6,7 @@ import { logEvent } from 'firebase/analytics';
 const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChainId, empty, setempty , buttonclick , setButtonclick }) => {
   const [selectedButton, setSelectedButton] = useState(null);
   const [inputValue, setInputValue] = useState('');
+  const [lastInteractionTime, setLastInteractionTime] = useState(Date.now());
 
   const tokenChainMap = {
     ETH: 1,
@@ -63,6 +64,7 @@ const SelectToken = ({ onCheckClick, setSelectedToken, setTokenAddress, setChain
   // };
 
   const handleInputChange = (e) => {
+    const newValue = e.target.value;
     setInputValue(e.target.value);
     setTokenAddress(e.target.value); // Update token address
     setempty(false);
